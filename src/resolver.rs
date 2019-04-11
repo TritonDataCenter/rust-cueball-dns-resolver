@@ -21,7 +21,7 @@ use trust_dns::op::ResponseCode;
 use trust_dns::rr::{DNSClass, Name, RData, RecordType};
 use trust_dns::udp::UdpClientConnection;
 
-use crate::cueball::backend;
+use cueball::backend;
 
 // TODO:
 // - checking based on A record TTLs
