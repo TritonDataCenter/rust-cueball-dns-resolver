@@ -3,16 +3,14 @@
  */
 use chrono::prelude::*;
 use chrono::{DateTime, Utc};
-use slog::{error, info, o, warn, Drain, Logger};
+use slog::{error, info, warn, Logger};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use std::sync::mpsc::channel;
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
 use std::thread;
 use std::vec::Vec;
 
@@ -254,10 +252,10 @@ impl PollResolverFSM for ResolverFSM {
         _srv_try: &'s mut RentToOwn<'s, SrvTry>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterSrvTry, ResolverError> {
+
         let lookup_name = format!("{}.{}", context.service, context.domain);
         let name = Name::from_str(&lookup_name).unwrap();
         let dns_client = &context.dns_client.as_ref();
-
         let domain = &context.domain;
 
         match dns_client {
@@ -534,6 +532,10 @@ fn send_updates(to_send: HashMap<String, backend::Backend>, s: Sender<BackendMsg
 
 #[test]
 fn test() {
+    use slog::{info, o, Drain, Logger};
+    use std::sync::mpsc::channel;
+    use std::sync::Mutex;
+
     let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
     let log = Logger::root(
         Mutex::new(slog_term::FullFormat::new(plain).build()).fuse(),
