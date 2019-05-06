@@ -5,9 +5,6 @@
 //! resolver is a library for resolving DNS records for cueball.
 #[allow(dead_code)] // TODO: Remove after initial dev
 
-use chrono::prelude::*;
-use chrono::{DateTime, Utc};
-use slog::{error, info, warn, Logger};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -18,6 +15,10 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::vec::Vec;
 
+use chrono::prelude::*;
+use chrono::{DateTime, Utc};
+use cueball::backend;
+use slog::{error, info, warn, Logger};
 use state_machine_future::{transition, RentToOwn, StateMachineFuture};
 use tokio::prelude::*;
 use trust_dns::client::{Client, SyncClient};
@@ -25,7 +26,7 @@ use trust_dns::op::ResponseCode;
 use trust_dns::rr::{DNSClass, Name, RData, RecordType};
 use trust_dns::udp::UdpClientConnection;
 
-use cueball::backend;
+
 
 // TODO:
 // - checking based on A record TTLs
@@ -319,7 +320,7 @@ impl PollResolverFSM for ResolverFSM {
     ) -> Poll<AfterSrvErr, ResolverError> {
 
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let b = backend::Backend::new(&ip, &255);
+        let b = backend::Backend::new(&ip, 255);
         context.backends.insert(b.name.to_string(), b);
 
         transition!(Aaaa)
@@ -434,7 +435,7 @@ impl PollResolverFSM for ResolverFSM {
 
         for srv in context.srvs.iter() {
             for ip in srv.addresses_v4.iter() {
-                let b = backend::Backend::new(&ip, &srv.port);
+                let b = backend::Backend::new(&ip, srv.port);
                 new_backends.entry(b.name.to_string()).or_insert(b);
             }
         }

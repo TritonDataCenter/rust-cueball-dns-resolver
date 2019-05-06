@@ -10,7 +10,6 @@ chrono = "0.4"
 cueball = { git = "https://github.com/joyent/rust-cueball.git" }
 derive_more = "0.14.0"
 futures = "0.1"
-quickcheck = "0.8.0"
 resolv-conf = "0.6.2"
 sha1 = "0.6.0"
 slog = "2.4.1"
