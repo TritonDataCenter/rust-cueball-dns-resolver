@@ -18,6 +18,7 @@ use std::vec::Vec;
 use chrono::prelude::*;
 use chrono::{DateTime, Utc};
 use cueball::backend;
+use cueball::resolver::{BackendAddedMsg, BackendMsg, Resolver};
 use slog::{error, info, warn, Logger};
 use state_machine_future::{transition, RentToOwn, StateMachineFuture};
 use tokio::prelude::*;
@@ -25,7 +26,6 @@ use trust_dns::client::{Client, SyncClient};
 use trust_dns::op::ResponseCode;
 use trust_dns::rr::{DNSClass, Name, RData, RecordType};
 use trust_dns::udp::UdpClientConnection;
-
 
 
 // TODO:
@@ -37,26 +37,10 @@ use trust_dns::udp::UdpClientConnection;
 // - comments
 // - unused (but used) import errors
 
-pub trait Resolver: Send + 'static {
-    fn start(&mut self, s: Sender<BackendMsg>);
-    fn stop(&mut self);
-    fn get_last_error(&self) -> Option<String>;
-}
-
-#[derive(Debug)]
-pub struct BackendAddedMsg {
-    pub key: backend::BackendKey,
-    pub backend: backend::Backend,
-}
 
 #[derive(Debug)]
 pub struct BackendRemovedMsg(pub backend::BackendKey);
 
-#[derive(Debug)]
-pub enum BackendMsg {
-    AddedMsg(BackendAddedMsg),
-    RemovedMsg(BackendRemovedMsg),
-}
 
 pub enum BackendAction {
     BackendAdded,
