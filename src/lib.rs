@@ -244,7 +244,7 @@ impl PollResolverFSM for ResolverFSM {
 
         let lookup_name = format!("{}.{}", context.service, context.domain);
         let name = Name::from_str(&lookup_name).unwrap();
-        let dns_client = &context.dns_client.as_ref();
+        let dns_client = context.dns_client.as_ref();
         let domain = &context.domain;
 
         match dns_client {
