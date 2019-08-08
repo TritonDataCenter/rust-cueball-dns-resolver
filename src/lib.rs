@@ -205,6 +205,7 @@ enum ResolverFSM {
 }
 
 impl PollResolverFSM for ResolverFSM {
+    //startup
     fn poll_init<'s, 'c>(
         _init: &'s mut RentToOwn<'s, Init>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -212,6 +213,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(CheckNs)
     }
 
+    // bootstrap resolvers, use resolv.conf if none specified
     fn poll_check_ns<'s, 'c>(
         _check_ns: &'s mut RentToOwn<'s, CheckNs>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -237,6 +239,8 @@ impl PollResolverFSM for ResolverFSM {
         transition!(SrvTry)
     }
 
+    // look up the SRV records and populate the context.srvs vector
+    // with name+port objects, each of which will become a backend
     fn poll_srv_try<'s, 'c>(
         _srv_try: &'s mut RentToOwn<'s, SrvTry>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -299,6 +303,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(Aaaa)
     }
 
+    // if no SRV records, populate with a dummy backend
     fn poll_srv_err<'s, 'c>(
         _srv_err: &'s mut RentToOwn<'s, SrvErr>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -311,6 +316,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(Aaaa)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa<'s, 'c>(
         _aaaa: &'s mut RentToOwn<'s, Aaaa>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -319,6 +325,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(AaaaNext)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa_next<'s, 'c>(
         _aaaa_next: &'s mut RentToOwn<'s, AaaaNext>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -327,6 +334,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(AaaaTry)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa_try<'s, 'c>(
         _aaaa_try: &'s mut RentToOwn<'s, AaaaTry>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -335,6 +343,8 @@ impl PollResolverFSM for ResolverFSM {
         transition!(A)
     }
 
+    // a, a_next and a_try iterate over each entry and fill out
+    // IP address and expiry information
     fn poll_a<'s, 'c>(
         _a: &'s mut RentToOwn<'s, A>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -418,6 +428,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(ATry)
     }
 
+    // process emits events to cueball for each backend
     fn poll_process<'s, 'c>(
         _process: &'s mut RentToOwn<'s, Process>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
