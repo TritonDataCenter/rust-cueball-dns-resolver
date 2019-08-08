@@ -4,7 +4,6 @@
 
 //! resolver is a library for resolving DNS records for cueball.
 #[allow(dead_code)] // TODO: Remove after initial dev
-
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -19,7 +18,7 @@ use chrono::prelude::*;
 use chrono::{DateTime, Utc};
 use cueball::backend;
 use cueball::resolver::{BackendAddedMsg, BackendMsg, Resolver};
-use slog::{error, info, warn, Logger};
+use slog::{error, info, debug, warn, Logger};
 use state_machine_future::{transition, RentToOwn, StateMachineFuture};
 use tokio::prelude::*;
 use trust_dns::client::{Client, SyncClient};
@@ -187,7 +186,7 @@ enum ResolverFSM {
     AaaaNext,
     #[state_machine_future(transitions(A))]
     AaaaTry,
-    #[state_machine_future(transitions(ATry, Error))]
+    #[state_machine_future(transitions(ANext, Error))]
     A,
     #[state_machine_future(transitions(ANext, AErr))]
     ATry,
@@ -206,6 +205,7 @@ enum ResolverFSM {
 }
 
 impl PollResolverFSM for ResolverFSM {
+    //startup
     fn poll_init<'s, 'c>(
         _init: &'s mut RentToOwn<'s, Init>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -213,6 +213,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(CheckNs)
     }
 
+    // bootstrap resolvers, use resolv.conf if none specified
     fn poll_check_ns<'s, 'c>(
         _check_ns: &'s mut RentToOwn<'s, CheckNs>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -238,6 +239,8 @@ impl PollResolverFSM for ResolverFSM {
         transition!(SrvTry)
     }
 
+    // look up the SRV records and populate the context.srvs vector
+    // with name+port objects, each of which will become a backend
     fn poll_srv_try<'s, 'c>(
         _srv_try: &'s mut RentToOwn<'s, SrvTry>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -245,12 +248,13 @@ impl PollResolverFSM for ResolverFSM {
 
         let lookup_name = format!("{}.{}", context.service, context.domain);
         let name = Name::from_str(&lookup_name).unwrap();
-        let dns_client = &context.dns_client.as_ref();
+        let dns_client = context.dns_client.as_ref();
         let domain = &context.domain;
 
         match dns_client {
             Some(client) => match client.query(&name, DNSClass::IN, RecordType::SRV) {
                 Ok(srv_resp) => {
+                    debug!(context.log, "srv_response: {:?}", srv_resp);
                     if srv_resp.response_code() == ResponseCode::NoError {
                         for srv in srv_resp.answers() {
                             if let &RData::SRV(ref s_rec) = srv.rdata() {
@@ -268,6 +272,7 @@ impl PollResolverFSM for ResolverFSM {
                                     expiry_v4: Some(next_service),
                                 };
                                 context.srvs.push(lookup_name);
+                                debug!(context.log, "context srvs: {:?}", context.srvs);
                             }
                         }
                     } else if srv_resp.response_code() == ResponseCode::NotImp
@@ -298,6 +303,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(Aaaa)
     }
 
+    // if no SRV records, populate with a dummy backend
     fn poll_srv_err<'s, 'c>(
         _srv_err: &'s mut RentToOwn<'s, SrvErr>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -310,6 +316,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(Aaaa)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa<'s, 'c>(
         _aaaa: &'s mut RentToOwn<'s, Aaaa>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -318,6 +325,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(AaaaNext)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa_next<'s, 'c>(
         _aaaa_next: &'s mut RentToOwn<'s, AaaaNext>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -326,6 +334,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(AaaaTry)
     }
 
+    // IPv6 handling not implemented
     fn poll_aaaa_try<'s, 'c>(
         _aaaa_try: &'s mut RentToOwn<'s, AaaaTry>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -334,13 +343,16 @@ impl PollResolverFSM for ResolverFSM {
         transition!(A)
     }
 
+    // a, a_next and a_try iterate over each entry and fill out
+    // IP address and expiry information
     fn poll_a<'s, 'c>(
         _a: &'s mut RentToOwn<'s, A>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterA, ResolverError> {
 
         context.srv_rem = context.srvs.clone();
-        transition!(ATry)
+        debug!(context.log, "context.srv_rem: {:?}", context.srv_rem);
+        transition!(ANext)
     }
 
     fn poll_a_next<'s, 'c>(
@@ -372,9 +384,11 @@ impl PollResolverFSM for ResolverFSM {
 
         match client {
             Some(client) => {
+                debug!(context.log, "querying a record for {:?}", srv);
                 let target = Name::from_str(&srv.name).unwrap();
                 match client.query(&target, DNSClass::IN, RecordType::A) {
                     Ok(a_resp) => {
+                        debug!(context.log, "a resp: {:?}", a_resp);
                         if a_resp.response_code() == ResponseCode::NoError {
                             for a in a_resp.answers() {
                                 if let &RData::A(ref ip) = a.rdata() {
@@ -390,8 +404,11 @@ impl PollResolverFSM for ResolverFSM {
                         } else {
                             transition!(AErr)
                         }
+                    },
+                    Err(_) =>  {
+                        info!(context.log, "a resp error");
+                        transition!(AErr)
                     }
-                    Err(_) => transition!(AErr),
                 };
             }
             None => {
@@ -411,6 +428,7 @@ impl PollResolverFSM for ResolverFSM {
         transition!(ATry)
     }
 
+    // process emits events to cueball for each backend
     fn poll_process<'s, 'c>(
         _process: &'s mut RentToOwn<'s, Process>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
@@ -541,11 +559,11 @@ fn test() {
     );
 
     info!(log, "running basic cueball resolver example");
-    let resolvers: Vec<String> = vec!["8.8.8.8:53".to_string()];
+    let resolvers: Vec<String> = vec!["10.77.77.94:53".to_string()];
     let mut cr = CueballResolver::new(
         &resolvers,
-        "sip.outboundproxy.com".to_string(),
-        "_sip._udp".to_string(),
+        "1.moray.orbit.example.com".to_string(),
+        "_moray._tcp".to_string(),
         53,
         log,
     );
