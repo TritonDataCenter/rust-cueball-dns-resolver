@@ -1,6 +1,4 @@
-/*
- * Copyright 2019 Joyent, Inc.
- */
+// Copyright 2019 Joyent, Inc.
 
 //! resolver is a library for resolving DNS records for cueball.
 #[allow(dead_code)] // TODO: Remove after initial dev
@@ -18,14 +16,13 @@ use chrono::prelude::*;
 use chrono::{DateTime, Utc};
 use cueball::backend;
 use cueball::resolver::{BackendAddedMsg, BackendMsg, Resolver};
-use slog::{error, info, debug, warn, Logger};
+use slog::{debug, error, info, warn, Logger};
 use state_machine_future::{transition, RentToOwn, StateMachineFuture};
 use tokio::prelude::*;
 use trust_dns::client::{Client, SyncClient};
 use trust_dns::op::ResponseCode;
 use trust_dns::rr::{DNSClass, Name, RData, RecordType};
 use trust_dns::udp::UdpClientConnection;
-
 
 // TODO:
 // - checking based on A record TTLs
@@ -36,10 +33,8 @@ use trust_dns::udp::UdpClientConnection;
 // - comments
 // - unused (but used) import errors
 
-
 #[derive(Debug)]
 pub struct BackendRemovedMsg(pub backend::BackendKey);
-
 
 pub enum BackendAction {
     BackendAdded,
@@ -114,10 +109,6 @@ impl Resolver for CueballResolver {
     }
 
     fn stop(&mut self) {
-        std::unimplemented!()
-    }
-
-    fn get_last_error(&self) -> Option<String> {
         std::unimplemented!()
     }
 }
@@ -218,7 +209,6 @@ impl PollResolverFSM for ResolverFSM {
         _check_ns: &'s mut RentToOwn<'s, CheckNs>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterCheckNs, ResolverError> {
-
         if context.resolvers.len() == 0 {
             if !configure_from_resolv_conf(context) {
                 configure_default_resolvers(context);
@@ -245,7 +235,6 @@ impl PollResolverFSM for ResolverFSM {
         _srv_try: &'s mut RentToOwn<'s, SrvTry>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterSrvTry, ResolverError> {
-
         let lookup_name = format!("{}.{}", context.service, context.domain);
         let name = Name::from_str(&lookup_name).unwrap();
         let dns_client = context.dns_client.as_ref();
@@ -308,7 +297,6 @@ impl PollResolverFSM for ResolverFSM {
         _srv_err: &'s mut RentToOwn<'s, SrvErr>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterSrvErr, ResolverError> {
-
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let b = backend::Backend::new(&ip, 255);
         context.backends.insert(b.name.to_string(), b);
@@ -321,7 +309,6 @@ impl PollResolverFSM for ResolverFSM {
         _aaaa: &'s mut RentToOwn<'s, Aaaa>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterAaaa, ResolverError> {
-
         transition!(AaaaNext)
     }
 
@@ -330,7 +317,6 @@ impl PollResolverFSM for ResolverFSM {
         _aaaa_next: &'s mut RentToOwn<'s, AaaaNext>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterAaaaNext, ResolverError> {
-
         transition!(AaaaTry)
     }
 
@@ -339,7 +325,6 @@ impl PollResolverFSM for ResolverFSM {
         _aaaa_try: &'s mut RentToOwn<'s, AaaaTry>,
         _context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterAaaaTry, ResolverError> {
-
         transition!(A)
     }
 
@@ -349,7 +334,6 @@ impl PollResolverFSM for ResolverFSM {
         _a: &'s mut RentToOwn<'s, A>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterA, ResolverError> {
-
         context.srv_rem = context.srvs.clone();
         debug!(context.log, "context.srv_rem: {:?}", context.srv_rem);
         transition!(ANext)
@@ -359,7 +343,6 @@ impl PollResolverFSM for ResolverFSM {
         _a: &'s mut RentToOwn<'s, ANext>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterANext, ResolverError> {
-
         match context.srvs.iter().position(|s| s.name == context.srv.name) {
             Some(idx) => context.srvs[idx].addresses_v4 = context.srv.addresses_v4.clone(),
             None => error!(context.log, "srv not found!"),
@@ -378,7 +361,6 @@ impl PollResolverFSM for ResolverFSM {
         _a: &'s mut RentToOwn<'s, ATry>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterATry, ResolverError> {
-
         let client = context.dns_client.as_ref();
         let srv = &context.srv;
 
@@ -404,8 +386,8 @@ impl PollResolverFSM for ResolverFSM {
                         } else {
                             transition!(AErr)
                         }
-                    },
-                    Err(_) =>  {
+                    }
+                    Err(_) => {
                         info!(context.log, "a resp error");
                         transition!(AErr)
                     }
