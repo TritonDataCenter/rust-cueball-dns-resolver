@@ -69,7 +69,7 @@ impl CueballResolver {
 }
 
 impl Resolver for CueballResolver {
-    fn start(&mut self, s: Sender<BackendMsg>) {
+    fn run(&mut self, s: Sender<BackendMsg>) {
         let srv_retry_params = RetryParams {
             max: 0,
             count: 0,
@@ -106,10 +106,6 @@ impl Resolver for CueballResolver {
         let _fsm = thread::spawn(move || {
             let _result = resolver.wait();
         });
-    }
-
-    fn stop(&mut self) {
-        std::unimplemented!()
     }
 }
 
@@ -345,7 +341,7 @@ impl PollResolverFSM for ResolverFSM {
     ) -> Poll<AfterANext, ResolverError> {
         match context.srvs.iter().position(|s| s.name == context.srv.name) {
             Some(idx) => context.srvs[idx].addresses_v4 = context.srv.addresses_v4.clone(),
-            None => error!(context.log, "srv not found!"),
+            None => debug!(context.log, "scan of srv records for {} complete.", context.srv.name),
         };
 
         match context.srv_rem.pop() {
