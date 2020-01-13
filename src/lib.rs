@@ -1,7 +1,6 @@
 // Copyright 2019 Joyent, Inc.
 
 //! resolver is a library for resolving DNS records for cueball.
-#[allow(dead_code)] // TODO: Remove after initial dev
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -42,33 +41,23 @@ pub enum BackendAction {
 }
 
 #[derive(Debug)]
-pub struct CueballResolver {
-    resolvers: Vec<String>,
+pub struct DnsResolver {
     domain: String,
     service: String,
-    default_port: u16,
     log: Logger,
 }
 
-impl CueballResolver {
-    pub fn new(
-        resolvers: &Vec<String>,
-        domain: String,
-        service: String,
-        port: u16,
-        log: Logger,
-    ) -> Self {
-        CueballResolver {
-            resolvers: resolvers.to_vec(),
+impl DnsResolver {
+    pub fn new(domain: String, service: String, log: Logger) -> Self {
+        DnsResolver {
             domain,
             service,
-            default_port: port,
             log: log.clone(),
         }
     }
 }
 
-impl Resolver for CueballResolver {
+impl Resolver for DnsResolver {
     fn run(&mut self, s: Sender<BackendMsg>) {
         let srv_retry_params = RetryParams {
             max: 0,
@@ -87,7 +76,7 @@ impl Resolver for CueballResolver {
         };
 
         let resolver = ResolverFSM::start(ResolverContext {
-            resolvers: self.resolvers.clone(),
+            resolvers: Vec::new(),
             backends: HashMap::new(),
             srv: srv_rec,
             srvs: Vec::new(),
@@ -205,10 +194,8 @@ impl PollResolverFSM for ResolverFSM {
         _check_ns: &'s mut RentToOwn<'s, CheckNs>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterCheckNs, ResolverError> {
-        if context.resolvers.len() == 0 {
-            if !configure_from_resolv_conf(context) {
-                configure_default_resolvers(context);
-            }
+        if !configure_from_resolv_conf(context) {
+            configure_default_resolvers(context);
         }
 
         info!(context.log, "resolvers specified: {:?}", context.resolvers);
@@ -237,51 +224,68 @@ impl PollResolverFSM for ResolverFSM {
         let domain = &context.domain;
 
         match dns_client {
-            Some(client) => match client.query(&name, DNSClass::IN, RecordType::SRV) {
-                Ok(srv_resp) => {
-                    debug!(context.log, "srv_response: {:?}", srv_resp);
-                    if srv_resp.response_code() == ResponseCode::NoError {
-                        for srv in srv_resp.answers() {
-                            if let &RData::SRV(ref s_rec) = srv.rdata() {
-                                let ttl = srv.ttl();
-                                let now: DateTime<Utc> = Utc::now();
-                                let next: i64 = now.timestamp() + (1000 * ttl) as i64;
-                                let next_service = NaiveDateTime::from_timestamp(next, 0);
-                                context.last_srv_ttl = Some(ttl);
-                                context.next_service = Some(next_service);
-                                let port = s_rec.port().to_string().parse::<u16>().unwrap();
-                                let lookup_name = SrvRec {
-                                    name: s_rec.target().to_string(),
-                                    port: port,
-                                    addresses_v4: Vec::new(),
-                                    expiry_v4: Some(next_service),
-                                };
-                                context.srvs.push(lookup_name);
-                                debug!(context.log, "context srvs: {:?}", context.srvs);
+            Some(client) => {
+                match client.query(&name, DNSClass::IN, RecordType::SRV) {
+                    Ok(srv_resp) => {
+                        debug!(context.log, "srv_response: {:?}", srv_resp);
+                        if srv_resp.response_code() == ResponseCode::NoError {
+                            for srv in srv_resp.answers() {
+                                if let &RData::SRV(ref s_rec) = srv.rdata() {
+                                    let ttl = srv.ttl();
+                                    let now: DateTime<Utc> = Utc::now();
+                                    let next: i64 =
+                                        now.timestamp() + (1000 * ttl) as i64;
+                                    let next_service =
+                                        NaiveDateTime::from_timestamp(next, 0);
+                                    context.last_srv_ttl = Some(ttl);
+                                    context.next_service = Some(next_service);
+                                    let port = s_rec
+                                        .port()
+                                        .to_string()
+                                        .parse::<u16>()
+                                        .unwrap();
+                                    let lookup_name = SrvRec {
+                                        name: s_rec.target().to_string(),
+                                        port: port,
+                                        addresses_v4: Vec::new(),
+                                        expiry_v4: Some(next_service),
+                                    };
+                                    context.srvs.push(lookup_name);
+                                    debug!(
+                                        context.log,
+                                        "context srvs: {:?}", context.srvs
+                                    );
+                                }
                             }
+                        } else if srv_resp.response_code()
+                            == ResponseCode::NotImp
+                            || srv_resp.response_code()
+                                == ResponseCode::NXDomain
+                        {
+                            let now: DateTime<Utc> = Utc::now();
+                            let next: i64 =
+                                now.timestamp() + (1000 * 60 * 60) as i64;
+                            let next_service =
+                                NaiveDateTime::from_timestamp(next, 0);
+
+                            let lookup_name = SrvRec {
+                                name: domain.to_string(),
+                                port: context.defport.unwrap(),
+                                addresses_v4: Vec::new(),
+                                expiry_v4: Some(next_service),
+                            };
+
+                            context.srvs.push(lookup_name);
+                        } else if srv_resp.response_code()
+                            == ResponseCode::Refused
+                        {
+                            context.srv_retry_params.count = 0;
+                            transition!(SrvErr)
                         }
-                    } else if srv_resp.response_code() == ResponseCode::NotImp
-                        || srv_resp.response_code() == ResponseCode::NXDomain
-                    {
-                        let now: DateTime<Utc> = Utc::now();
-                        let next: i64 = now.timestamp() + (1000 * 60 * 60) as i64;
-                        let next_service = NaiveDateTime::from_timestamp(next, 0);
-
-                        let lookup_name = SrvRec {
-                            name: domain.to_string(),
-                            port: context.defport.unwrap(),
-                            addresses_v4: Vec::new(),
-                            expiry_v4: Some(next_service),
-                        };
-
-                        context.srvs.push(lookup_name);
-                    } else if srv_resp.response_code() == ResponseCode::Refused {
-                        context.srv_retry_params.count = 0;
-                        transition!(SrvErr)
                     }
+                    Err(e) => panic!("Got error on query {}", e),
                 }
-                Err(e) => panic!("Got error on query {}", e),
-            },
+            }
             None => panic!("No client configured!"),
         };
 
@@ -340,8 +344,14 @@ impl PollResolverFSM for ResolverFSM {
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterANext, ResolverError> {
         match context.srvs.iter().position(|s| s.name == context.srv.name) {
-            Some(idx) => context.srvs[idx].addresses_v4 = context.srv.addresses_v4.clone(),
-            None => debug!(context.log, "scan of srv records for {} complete.", context.srv.name),
+            Some(idx) => {
+                context.srvs[idx].addresses_v4 =
+                    context.srv.addresses_v4.clone()
+            }
+            None => debug!(
+                context.log,
+                "scan of srv records for {} complete.", context.srv.name
+            ),
         };
 
         match context.srv_rem.pop() {
@@ -372,10 +382,13 @@ impl PollResolverFSM for ResolverFSM {
                                 if let &RData::A(ref ip) = a.rdata() {
                                     let _ttl = a.ttl();
                                     match ip.to_string().parse::<IpAddr>() {
-                                        Ok(addr) => context.srv.addresses_v4.push(addr),
-                                        Err(e) => {
-                                            error!(context.log, "could not parse ip address: {}", e)
+                                        Ok(addr) => {
+                                            context.srv.addresses_v4.push(addr)
                                         }
+                                        Err(e) => error!(
+                                            context.log,
+                                            "could not parse ip address: {}", e
+                                        ),
                                     }
                                 }
                             }
@@ -411,7 +424,8 @@ impl PollResolverFSM for ResolverFSM {
         _process: &'s mut RentToOwn<'s, Process>,
         context: &'c mut RentToOwn<'c, ResolverContext>,
     ) -> Poll<AfterProcess, ResolverError> {
-        let mut new_backends: HashMap<String, backend::Backend> = HashMap::new();
+        let mut new_backends: HashMap<String, backend::Backend> =
+            HashMap::new();
 
         for srv in context.srvs.iter() {
             for ip in srv.addresses_v4.iter() {
@@ -423,7 +437,9 @@ impl PollResolverFSM for ResolverFSM {
         if new_backends.keys().len() == 0 {
             info!(
                 context.log,
-                "found no DNS records for {}.{}", context.service, context.domain
+                "found no DNS records for {}.{}",
+                context.service,
+                context.domain
             );
             transition!(Sleep)
         }
@@ -459,7 +475,8 @@ impl PollResolverFSM for ResolverFSM {
     ) -> Poll<AfterSleep, ResolverError> {
         let now = Utc::now().naive_utc();
 
-        let min_delay = context.next_service.unwrap().signed_duration_since(now);
+        let min_delay =
+            context.next_service.unwrap().signed_duration_since(now);
 
         info!(context.log, "sleeping for {}", min_delay);
         thread::sleep(min_delay.to_std().unwrap());
@@ -472,7 +489,9 @@ fn init_dns_client(resolver: &str) -> Option<SyncClient<UdpClientConnection>> {
         Ok(server) => {
             match UdpClientConnection::new(server) {
                 Ok(conn) => return Some(SyncClient::new(conn)),
-                Err(e) => panic!("couldn't start a new DNS client connection: {}", e),
+                Err(e) => {
+                    panic!("couldn't start a new DNS client connection: {}", e)
+                }
             };
         }
         Err(e) => panic!("could not parse resolver ip: {}", e),
@@ -510,7 +529,11 @@ fn configure_from_resolv_conf(context: &mut ResolverContext) -> bool {
     };
 }
 
-fn send_updates(to_send: HashMap<String, backend::Backend>, s: Sender<BackendMsg>, log: Logger) {
+fn send_updates(
+    to_send: HashMap<String, backend::Backend>,
+    s: Sender<BackendMsg>,
+    log: Logger,
+) {
     to_send.iter().for_each(|(k, b)| {
         let backend_key = backend::srv_key(b);
         let backend_msg = BackendMsg::AddedMsg(BackendAddedMsg {
@@ -537,16 +560,13 @@ fn test() {
     );
 
     info!(log, "running basic cueball resolver example");
-    let resolvers: Vec<String> = vec!["10.77.77.94:53".to_string()];
-    let mut cr = CueballResolver::new(
-        &resolvers,
+    let mut cr = DnsResolver::new(
         "1.moray.orbit.example.com".to_string(),
         "_moray._tcp".to_string(),
-        53,
         log,
     );
     let (sender, receiver) = channel();
-    cr.start(sender);
+    cr.run(sender);
     assert!(receiver.recv().is_ok());
     assert!(receiver.recv().is_ok());
 }
