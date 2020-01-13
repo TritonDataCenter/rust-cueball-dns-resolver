@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 base64 = "0.10.1"
 chrono = "0.4"
-cueball = { git = "https://github.com/joyent/rust-cueball.git", tag = "v0.1.0" }
+cueball = "0.3.0"
 derive_more = "0.14.0"
 futures = "0.1"
 resolv-conf = "0.6.2"
@@ -18,6 +18,7 @@ trust-dns-resolver = "0.11.1"
 trust-dns = "^0.16.1"
 tokio = "0.1.5"
 tokio-core = "0.1.17"
+unicode-normalization = "=0.1.5"
 
 [dev-dependencies]
 slog-term = "2.4.0"
